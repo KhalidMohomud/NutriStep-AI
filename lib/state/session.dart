@@ -14,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'
 import '../plan/plan.dart';
 import '../theme/macros.dart';
 import 'backend.dart';
+import 'steps.dart';
 
 class Profile {
   const Profile({
@@ -70,6 +71,19 @@ class Meal {
 
 DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
 
+/// "khalid.mohamud@gmail.com" → "Khalid Mohamud", "qaalidsome@gmail.com" →
+/// "Qaalidsome". Digit-only parts ("ali_99") are dropped; null if nothing's left.
+String? nameFromEmail(String email) {
+  final name = email
+      .split('@')
+      .first
+      .split(RegExp(r'[._\-+]+'))
+      .where((w) => w.isNotEmpty && !RegExp(r'^\d+$').hasMatch(w))
+      .map((w) => w[0].toUpperCase() + w.substring(1))
+      .join(' ');
+  return name.isEmpty ? null : name;
+}
+
 /// How a scan ended.
 sealed class ScanResult {
   const ScanResult();
@@ -124,10 +138,98 @@ class Session extends ChangeNotifier {
       backendEnabled ? supabase.auth.currentSession != null : _demoSignedIn;
   Profile? get profile => _profile;
 
-  /// Today's step count. Health Connect / HealthKit fill this in (PLAN.md
-  /// phase 4); until then it stays 0.
+  // ── steps ──────────────────────────────────────────────────────────────────
+
+  final _steps = StepCounter();
+  StepsStatus stepsStatus = StepsStatus.notConnected;
+
+  /// Today's step count, kept live while the app is open.
   int stepsToday = 0;
+  int _syncedSteps = -1;
+  DateTime _syncedAt = DateTime(0);
+
+  /// On launch: carry on counting if the user connected before, without asking again.
+  Future<void> resumeSteps() async {
+    if (stepsStatus == StepsStatus.connected) return;
+    if (!await _steps.wasConnected()) return;
+    stepsStatus = StepsStatus.connected;
+    _steps.onSteps = _setSteps;
+    await refreshSteps();
+  }
+
+  /// The "Count my steps" button: asks for permission, then starts counting.
+  Future<void> connectSteps() async {
+    _steps.onSteps = _setSteps;
+    stepsStatus = await _steps.connect();
+    notifyListeners();
+    if (stepsStatus == StepsStatus.connected) await refreshSteps();
+  }
+
+  Future<void> refreshSteps() async {
+    if (stepsStatus != StepsStatus.connected) return;
+    _setSteps(await _steps.refresh());
+  }
+
+  void _setSteps(int steps) {
+    if (steps == stepsToday) return;
+    stepsToday = steps;
+    notifyListeners();
+    _syncSteps();
+  }
+
+  /// Today's total into activity_logs — at most every few minutes, not every step.
+  Future<void> _syncSteps() async {
+    if (!backendEnabled || stepsToday == _syncedSteps) return;
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+    final sinceSync = DateTime.now().difference(_syncedAt);
+    if (sinceSync < const Duration(minutes: 3)) return;
+    _syncedAt = DateTime.now();
+    final now = DateTime.now();
+    final date =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    try {
+      await supabase.from('activity_logs').upsert({
+        'user_id': user.id,
+        'date': date,
+        'steps': stepsToday,
+        'synced_at': now.toUtc().toIso8601String(),
+      }, onConflict: 'user_id,date');
+      _syncedSteps = stepsToday;
+    } catch (e) {
+      debugPrint('Step sync failed: $e');
+    }
+  }
+
   String? get email => backendEnabled ? supabase.auth.currentUser?.email : null;
+
+  String? _displayName;
+
+  /// What to call them: the name they set, else one made from their email.
+  /// Nobody is asked for it.
+  String? get displayName {
+    final name = _displayName?.trim();
+    if (name != null && name.isNotEmpty) return name;
+    final e = email;
+    return e == null ? null : nameFromEmail(e);
+  }
+
+  bool get hasName => (_displayName?.trim() ?? '').isNotEmpty;
+
+  Future<void> updateDisplayName(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return;
+    if (backendEnabled) {
+      final user = supabase.auth.currentUser;
+      if (user == null) throw StateError('Not signed in');
+      await supabase
+          .from('profiles')
+          .update({'display_name': trimmed})
+          .eq('id', user.id);
+    }
+    _displayName = trimmed;
+    notifyListeners();
+  }
 
   /// Restores a saved session's profile before the first frame, so a returning
   /// user lands on Home instead of flashing through onboarding.
@@ -201,8 +303,19 @@ class Session extends ChangeNotifier {
   }
 
   /// Throws [AuthException] with a message to show.
-  Future<SignUpOutcome> signUpWithEmail(String email, String password) async {
-    final res = await supabase.auth.signUp(email: email, password: password);
+  Future<SignUpOutcome> signUpWithEmail(
+    String email,
+    String password, {
+    String? name,
+  }) async {
+    // the name rides along as metadata too, so it survives an email-confirm detour
+    final res = await supabase.auth.signUp(
+      email: email,
+      password: password,
+      data: name == null || name.trim().isEmpty
+          ? null
+          : {'display_name': name.trim()},
+    );
     // with "Confirm email" on (the Supabase default) there's no session until
     // they tap the link in their inbox
     if (res.session == null) return SignUpOutcome.confirmEmail;
@@ -225,6 +338,17 @@ class Session extends ChangeNotifier {
         .eq('id', user.id)
         .maybeSingle();
     _profile = row == null ? null : _profileFromRow(row);
+    _displayName = row?['display_name'] as String?;
+
+    // given at sign-up but not saved yet (the row is made by a trigger)
+    final pending = user.userMetadata?['display_name'] as String?;
+    if (!hasName && pending != null && pending.trim().isNotEmpty) {
+      try {
+        await updateDisplayName(pending);
+      } catch (e) {
+        debugPrint('Could not save name: $e');
+      }
+    }
   }
 
   Future<void> saveProfile(Profile profile) async {
@@ -272,6 +396,7 @@ class Session extends ChangeNotifier {
     }
     _demoSignedIn = false;
     _profile = null;
+    _displayName = null;
     _meals.clear();
     notifyListeners();
   }

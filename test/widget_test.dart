@@ -100,4 +100,11 @@ void main() {
     expect(changes, isEmpty);
     expect(find.text('175'), findsWidgets);
   });
+
+  test('a name is made from the email', () {
+    expect(nameFromEmail('qaalidsome@gmail.com'), 'Qaalidsome');
+    expect(nameFromEmail('khalid.mohamud@gmail.com'), 'Khalid Mohamud');
+    expect(nameFromEmail('ali_99@yahoo.com'), 'Ali');
+    expect(nameFromEmail('12345@test.com'), isNull);
+  });
 }

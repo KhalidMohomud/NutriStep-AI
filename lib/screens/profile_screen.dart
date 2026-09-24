@@ -1,12 +1,15 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../state/backend.dart';
 import '../state/session.dart';
+import '../state/steps.dart';
 import '../theme/app_colors.dart';
 import '../theme/macros.dart';
 import '../widgets/pressable.dart';
+import '../widgets/primary_button.dart';
 import 'plan_reveal_screen.dart';
 
 const _groupedBackground = Color(0xFFF3F5F4);
@@ -107,7 +110,7 @@ class ProfileScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 18),
-            _UserCard(onTap: () => context.push('/profile/details')),
+            _UserCard(onTap: () => _editName(context)),
             const SizedBox(height: 12),
             _UpgradeCard(onTap: () => _soon(context)),
 
@@ -132,9 +135,18 @@ class ProfileScreen extends StatelessWidget {
                 ),
                 _Row(
                   icon: Icons.favorite_border,
-                  label: isIOS ? 'Apple Health' : 'Health Connect',
-                  value: 'Connect',
-                  onTap: () => _soon(context),
+                  label: isIOS ? 'Apple Health' : 'Step counting',
+                  value: switch (session.stepsStatus) {
+                    StepsStatus.connected => 'On',
+                    StepsStatus.denied => 'Blocked',
+                    StepsStatus.unavailable => 'Not available',
+                    StepsStatus.notConnected => 'Connect',
+                  },
+                  onTap: switch (session.stepsStatus) {
+                    StepsStatus.notConnected => session.connectSteps,
+                    StepsStatus.denied => openAppSettings,
+                    _ => null,
+                  },
                 ),
               ],
             ),
@@ -240,6 +252,128 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
+String _initials(String name) {
+  final words = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty);
+  return words.take(2).map((w) => w[0].toUpperCase()).join();
+}
+
+/// Bottom sheet to set or change the name shown on the profile.
+Future<void> _editName(BuildContext context) {
+  final controller = TextEditingController(text: session.displayName ?? '');
+  return showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
+    backgroundColor: AppColors.background,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    ),
+    builder: (sheet) {
+      var saving = false;
+      return StatefulBuilder(
+        builder: (sheet, setSheet) => Padding(
+          // lift above the keyboard
+          padding: EdgeInsets.fromLTRB(
+            24,
+            12,
+            24,
+            MediaQuery.viewInsetsOf(sheet).bottom +
+                MediaQuery.paddingOf(sheet).bottom +
+                20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE2E2E7),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 22),
+              const Text(
+                'Your name',
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.ink,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'This is how NutriStep greets you.',
+                style: TextStyle(fontSize: 15, color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 18),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                autofillHints: const [AutofillHints.name],
+                maxLength: 40,
+                cursorColor: AppColors.brandGreen,
+                onChanged: (_) => setSheet(() {}),
+                style: const TextStyle(fontSize: 17, color: AppColors.ink),
+                decoration: InputDecoration(
+                  hintText: 'e.g. Khalid Mohamud',
+                  counterText: '',
+                  filled: true,
+                  fillColor: AppColors.card,
+                  prefixIcon: const Icon(
+                    Icons.person_outline,
+                    color: AppColors.textFaint,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: AppColors.borderStrong),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(
+                      color: AppColors.brandGreen,
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              PrimaryButton(
+                label: 'Save',
+                loading: saving,
+                onPressed: controller.text.trim().isEmpty
+                    ? null
+                    : () async {
+                        setSheet(() => saving = true);
+                        try {
+                          await session.updateDisplayName(controller.text);
+                          if (sheet.mounted) Navigator.of(sheet).pop();
+                        } catch (e) {
+                          setSheet(() => saving = false);
+                          if (sheet.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  "Couldn't save your name. Try again.",
+                                ),
+                              ),
+                            );
+                          }
+                        }
+                      },
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class _UserCard extends StatelessWidget {
   const _UserCard({required this.onTap});
 
@@ -247,6 +381,9 @@ class _UserCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final name = session.displayName;
+    final email = session.email;
+
     return Pressable(
       onTap: onTap,
       child: Container(
@@ -260,23 +397,33 @@ class _UserCard extends StatelessWidget {
           children: [
             // gradient ring around the avatar, like the logo's sweep
             Container(
-              width: 60,
-              height: 60,
+              width: 62,
+              height: 62,
               padding: const EdgeInsets.all(2.5),
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: AppColors.brandGradient,
               ),
               child: Container(
+                alignment: Alignment.center,
                 decoration: const BoxDecoration(
                   shape: BoxShape.circle,
                   color: AppColors.brandGreenTint,
                 ),
-                child: const Icon(
-                  Icons.person,
-                  size: 30,
-                  color: AppColors.brandGreen,
-                ),
+                child: name == null
+                    ? const Icon(
+                        Icons.person,
+                        size: 30,
+                        color: AppColors.brandGreen,
+                      )
+                    : Text(
+                        _initials(name),
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.brandGreenDark,
+                        ),
+                      ),
               ),
             ),
             const SizedBox(width: 14),
@@ -303,22 +450,29 @@ class _UserCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
-                    'Your profile',
-                    style: TextStyle(
+                  Text(
+                    name ?? 'Your profile',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w700,
                       color: AppColors.ink,
                     ),
                   ),
-                  const Text(
-                    'Body stats, goal and targets',
-                    style: TextStyle(fontSize: 15, color: AppColors.textFaint),
+                  Text(
+                    email ?? 'Tap to edit your name',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      color: AppColors.textFaint,
+                    ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: _chevron),
+            const Icon(Icons.edit_outlined, size: 20, color: _chevron),
           ],
         ),
       ),

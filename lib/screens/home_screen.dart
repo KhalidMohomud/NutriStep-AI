@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../state/session.dart';
+import '../state/steps.dart';
 import '../theme/app_colors.dart';
 import '../theme/macros.dart';
 import '../widgets/brand.dart';
@@ -25,7 +28,26 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  Timer? _stepsTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    session.resumeSteps();
+    // HealthKit has no live stream; Android's sensor does, this just backs it up
+    _stepsTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => session.refreshSteps(),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) session.refreshSteps();
+  }
+
   final DateTime _today = _midnight(DateTime.now());
   late DateTime _selected = _today;
 
@@ -42,6 +64,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stepsTimer?.cancel();
     _strip.dispose();
     super.dispose();
   }
@@ -204,63 +228,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
             ),
-            _Card(
-              margin: const EdgeInsets.fromLTRB(22, 12, 22, 0),
-              radius: 20,
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Ring(
-                    size: 58,
-                    stroke: 7,
-                    progress: steps / _stepGoal,
-                    color: AppColors.brandBlue,
-                    child: const Icon(
-                      Icons.directions_walk,
-                      size: 24,
-                      color: AppColors.brandBlue,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text.rich(
-                          TextSpan(
-                            text: formatThousands(steps),
-                            children: [
-                              TextSpan(
-                                text: ' / ${formatThousands(_stepGoal)}',
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppColors.textFaint,
-                                ),
-                              ),
-                            ],
-                          ),
-                          style: const TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.4,
-                            color: AppColors.ink,
-                          ),
-                        ),
-                        const SizedBox(height: 1),
-                        const Text(
-                          'Steps today',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // steps are a today thing; past days show meals only
+            if (isToday) _StepsCard(steps: steps, status: session.stepsStatus),
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 28, 22, 0),
               child: Text(
@@ -324,6 +293,122 @@ String _longDate(DateTime d) {
     'Dec',
   ];
   return '${days[d.weekday - 1]}, ${months[d.month - 1]} ${d.day}';
+}
+
+/// Today's steps — or, until it's connected, the way to connect it.
+class _StepsCard extends StatelessWidget {
+  const _StepsCard({required this.steps, required this.status});
+
+  final int steps;
+  final StepsStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final connected = status == StepsStatus.connected;
+    final (subtitle, action, onAction) = switch (status) {
+      StepsStatus.connected => ('Steps today', null, null),
+      StepsStatus.notConnected => (
+        'See your steps next to your meals',
+        'Connect',
+        session.connectSteps,
+      ),
+      StepsStatus.denied => (
+        'Allow physical activity in Settings',
+        'Settings',
+        openAppSettings,
+      ),
+      StepsStatus.unavailable => ("This device can't count steps", null, null),
+    };
+
+    return _Card(
+      margin: const EdgeInsets.fromLTRB(22, 12, 22, 0),
+      radius: 20,
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Ring(
+            size: 58,
+            stroke: 7,
+            progress: connected ? steps / _stepGoal : 0,
+            color: AppColors.brandBlue,
+            child: const Icon(
+              Icons.directions_walk,
+              size: 24,
+              color: AppColors.brandBlue,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (connected)
+                  Text.rich(
+                    TextSpan(
+                      text: formatThousands(steps),
+                      children: [
+                        TextSpan(
+                          text: ' / ${formatThousands(_stepGoal)}',
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.textFaint,
+                          ),
+                        ),
+                      ],
+                    ),
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.4,
+                      color: AppColors.ink,
+                    ),
+                  )
+                else
+                  const Text(
+                    'Count your steps',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                const SizedBox(height: 1),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (action != null)
+            Pressable(
+              onTap: onAction,
+              child: Container(
+                height: 38,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  gradient: AppColors.brandGradient,
+                  borderRadius: BorderRadius.circular(19),
+                ),
+                child: Text(
+                  action,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 const _thumb = 62.0;
