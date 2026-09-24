@@ -14,6 +14,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'
 import '../plan/plan.dart';
 import '../theme/macros.dart';
 import 'backend.dart';
+import 'reminders.dart';
 import 'steps.dart';
 
 class Profile {
@@ -142,6 +143,20 @@ class Session extends ChangeNotifier {
 
   final _steps = StepCounter();
   StepsStatus stepsStatus = StepsStatus.notConnected;
+  static const stepGoal = 10000;
+
+  final reminders = StepReminders();
+  bool get remindersOn => reminders.enabled;
+
+  Future<void> setReminders(bool on) async {
+    if (on) {
+      await reminders.enable();
+      await reminders.update(stepsToday, stepGoal);
+    } else {
+      await reminders.disable();
+    }
+    notifyListeners();
+  }
 
   /// Today's step count, kept live while the app is open.
   int stepsToday = 0;
@@ -162,7 +177,11 @@ class Session extends ChangeNotifier {
     _steps.onSteps = _setSteps;
     stepsStatus = await _steps.connect();
     notifyListeners();
-    if (stepsStatus == StepsStatus.connected) await refreshSteps();
+    if (stepsStatus == StepsStatus.connected) {
+      await refreshSteps();
+      // counting steps and hearing about them go together — one OS prompt, right here
+      if (!reminders.enabled) await setReminders(true);
+    }
   }
 
   Future<void> refreshSteps() async {
@@ -175,6 +194,7 @@ class Session extends ChangeNotifier {
     stepsToday = steps;
     notifyListeners();
     _syncSteps();
+    reminders.update(steps, stepGoal);
   }
 
   /// Today's total into activity_logs — at most every few minutes, not every step.

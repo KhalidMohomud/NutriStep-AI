@@ -10,6 +10,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initBackend();
   await session.restore();
+  await session.reminders.init();
   runApp(const NutriStepApp());
 }
 

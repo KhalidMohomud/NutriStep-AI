@@ -233,16 +233,16 @@ class _ScanButton extends StatelessWidget {
               ],
               stops: [0, 0.3, 0.7, 1],
             ),
-            // a ring in the page colour, so the button sits "in" the bar
+            // a ring in the bar's own colour, so the button reads as part of it
             border: Border.all(
-              color: dark ? scanBackground : AppColors.background,
+              color: dark ? const Color(0xFF14223F) : AppColors.card,
               width: 4,
             ),
             boxShadow: const [
               BoxShadow(
-                color: Color(0x4005A029),
-                blurRadius: 18,
-                offset: Offset(0, 6),
+                color: Color(0x2602203E),
+                blurRadius: 14,
+                offset: Offset(0, 4),
               ),
             ],
           ),

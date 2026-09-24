@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../state/backend.dart';
+import '../state/reminders.dart';
 import '../state/session.dart';
 import '../state/steps.dart';
 import '../theme/app_colors.dart';
@@ -150,6 +151,14 @@ class ProfileScreen extends StatelessWidget {
                     StepsStatus.denied => openAppSettings,
                     _ => null,
                   },
+                ),
+                _Row(
+                  icon: Icons.notifications_none_rounded,
+                  label: 'Step reminders',
+                  value: session.remindersOn
+                      ? '${StepReminders.summaryHour - 12} PM daily'
+                      : 'Off',
+                  onTap: () => session.setReminders(!session.remindersOn),
                 ),
               ],
             ),

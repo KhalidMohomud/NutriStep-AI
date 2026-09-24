@@ -17,7 +17,7 @@ import '../widgets/sheets.dart';
 import 'plan_reveal_screen.dart';
 
 const _weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const _stepGoal = 10000;
+const _stepGoal = Session.stepGoal;
 
 DateTime _midnight(DateTime d) => DateTime(d.year, d.month, d.day);
 
