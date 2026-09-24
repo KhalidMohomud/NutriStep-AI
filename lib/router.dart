@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'onboarding/steps.dart';
 import 'screens/app_shell.dart';
 import 'screens/building_screen.dart';
-import 'screens/email_sign_in_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_step_screen.dart';
 import 'screens/plan_includes_screen.dart';
@@ -40,9 +39,8 @@ final router = GoRouter(
     GoRoute(
       path: '/sign-in',
       builder: (_, _) => const SignInScreen(),
-      routes: [
-        GoRoute(path: 'email', builder: (_, _) => const EmailSignInScreen()),
-      ],
+      // the old two-step flow's URL still lands on the one screen
+      routes: [GoRoute(path: 'email', redirect: (_, _) => '/sign-in')],
     ),
     GoRoute(
       path: '/onboarding/building',

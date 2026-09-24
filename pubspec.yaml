@@ -99,3 +99,21 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# App icon — regenerate after changing the images: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assests/icon/app-icon.png"
+  remove_alpha_ios: true
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assests/icon/app-icon-foreground.png"
+
+# Launch screen — regenerate: dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#FCFEFC"
+  image: assests/icon/splash-logo.png
+  android_12:
+    color: "#FCFEFC"
+    image: assests/icon/splash-logo.png
+  web: false
