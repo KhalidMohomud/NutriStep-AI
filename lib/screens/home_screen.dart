@@ -97,7 +97,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       body: SafeArea(
         bottom: false,
         child: ListView(
-          padding: const EdgeInsets.only(bottom: 28),
+          // clear the floating tab bar (the Scaffold folds it into this padding)
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom + 20,
+          ),
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 10, 22, 0),

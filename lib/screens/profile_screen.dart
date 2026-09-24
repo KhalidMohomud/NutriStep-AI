@@ -95,7 +95,10 @@ class ProfileScreen extends StatelessWidget {
       body: SafeArea(
         bottom: false,
         child: ListView(
-          padding: const EdgeInsets.only(bottom: 28),
+          // clear the floating tab bar (the Scaffold folds it into this padding)
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom + 20,
+          ),
           children: [
             const Padding(
               padding: EdgeInsets.fromLTRB(22, 10, 22, 0),
@@ -672,7 +675,10 @@ class PersonalDetailsScreen extends StatelessWidget {
       backgroundColor: _groupedBackground,
       body: SafeArea(
         child: ListView(
-          padding: const EdgeInsets.only(bottom: 28),
+          // clear the floating tab bar (the Scaffold folds it into this padding)
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.paddingOf(context).bottom + 20,
+          ),
           children: [
             Padding(
               padding: const EdgeInsetsDirectional.only(start: 22, top: 4),
