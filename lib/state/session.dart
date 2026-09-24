@@ -1,0 +1,506 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'
+    show
+        AuthException,
+        FileOptions,
+        FunctionException,
+        OAuthProvider,
+        SignedUrlSuccess;
+
+import '../plan/plan.dart';
+import '../theme/macros.dart';
+import 'backend.dart';
+
+class Profile {
+  const Profile({
+    required this.input,
+    required this.plan,
+    required this.timezone,
+    required this.memberSince,
+  });
+
+  final PlanInput input;
+  final Plan plan;
+  final String timezone;
+  final DateTime memberSince;
+}
+
+enum MealStatus { analyzing, completed }
+
+class Meal {
+  const Meal({
+    required this.id,
+    required this.image,
+    required this.status,
+    required this.loggedAt,
+    this.imagePath,
+    this.name = '',
+    this.calories = 0,
+    this.protein = 0,
+    this.carbs = 0,
+    this.fat = 0,
+  });
+
+  final String id;
+
+  /// What to draw: a signed https URL, a local file path (just taken), or an
+  /// asset path (demo mode). See `mealImageProvider`.
+  final String image;
+
+  /// The photo's path in the meal-photos bucket, for rows from the database.
+  final String? imagePath;
+  final MealStatus status;
+  final DateTime loggedAt;
+  final String name;
+  final int calories;
+  final int protein;
+  final int carbs;
+  final int fat;
+
+  int grams(Macro macro) => switch (macro) {
+    Macro.protein => protein,
+    Macro.carbs => carbs,
+    Macro.fat => fat,
+  };
+}
+
+DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
+
+/// How a scan ended.
+sealed class ScanResult {
+  const ScanResult();
+}
+
+class ScanSuccess extends ScanResult {
+  const ScanSuccess(this.meal);
+  final Meal meal;
+}
+
+class ScanNotFood extends ScanResult {
+  const ScanNotFood();
+}
+
+class ScanQuotaReached extends ScanResult {
+  const ScanQuotaReached(this.limit);
+  final int limit;
+}
+
+class ScanFailed extends ScanResult {
+  const ScanFailed();
+}
+
+/// What the demo scan "finds" when there's no backend.
+const _demoResult = (
+  name: 'Grilled chicken & rice',
+  calories: 540,
+  protein: 42,
+  carbs: 55,
+  fat: 12,
+);
+
+/// Long edge of the uploaded photo. The model downsamples anyway; this keeps
+/// uploads ~100 KB and Gemini's image tokens low.
+const _uploadEdge = 1024;
+
+/// What an email sign-up ended in.
+enum SignUpOutcome { signedIn, confirmEmail }
+
+/// Who is signed in, their saved profile and their meals.
+///
+/// With Supabase configured ([backendEnabled]) everything is real: Supabase
+/// Auth, the user's `profiles` row, and `meals` written by the `analyze-meal`
+/// Edge Function. Without it, everything is in memory (demo mode). The screens
+/// only ever talk to this object, so none of that reaches them.
+class Session extends ChangeNotifier {
+  bool _demoSignedIn = false;
+  Profile? _profile;
+  final List<Meal> _meals = [];
+
+  bool get isSignedIn =>
+      backendEnabled ? supabase.auth.currentSession != null : _demoSignedIn;
+  Profile? get profile => _profile;
+  String? get email => backendEnabled ? supabase.auth.currentUser?.email : null;
+
+  /// Restores a saved session's profile before the first frame, so a returning
+  /// user lands on Home instead of flashing through onboarding.
+  Future<void> restore() async {
+    if (!backendEnabled || !isSignedIn) return;
+    try {
+      await _loadAccount();
+    } catch (e) {
+      // offline: the tabs' gate sends them to onboarding
+      debugPrint('Could not load account: $e');
+    }
+  }
+
+  /// Demo mode's stand-in for every sign-in button.
+  void signInDemo() {
+    _demoSignedIn = true;
+    notifyListeners();
+  }
+
+  /// Returns an error message to show, or null on success.
+  Future<String?> signInWithEmail(String email, String password) async {
+    try {
+      await supabase.auth.signInWithPassword(email: email, password: password);
+      await _loadAccount();
+      notifyListeners();
+      return null;
+    } on AuthException catch (e) {
+      return e.message;
+    }
+  }
+
+  static bool get googleConfigured =>
+      backendEnabled &&
+      googleWebClientId != '' &&
+      (defaultTargetPlatform != TargetPlatform.iOS || googleIosClientId != '');
+
+  bool _googleReady = false;
+
+  /// Native Google sheet → ID token → Supabase session. Returns an error message
+  /// to show, or null — which covers the user closing the sheet, too.
+  Future<String?> signInWithGoogle() async {
+    final google = GoogleSignIn.instance;
+    try {
+      if (!_googleReady) {
+        await google.initialize(
+          clientId: defaultTargetPlatform == TargetPlatform.iOS
+              ? googleIosClientId
+              : null,
+          serverClientId: googleWebClientId,
+        );
+        _googleReady = true;
+      }
+      final account = await google.authenticate();
+      final idToken = account.authentication.idToken;
+      if (idToken == null) return 'Google did not return an ID token.';
+
+      await supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.google,
+        idToken: idToken,
+      );
+      await _loadAccount();
+      notifyListeners();
+      return null;
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) return null;
+      debugPrint('Google sign-in failed: $e');
+      return 'Google sign-in failed. Please try again.';
+    } on AuthException catch (e) {
+      return e.message;
+    }
+  }
+
+  /// Throws [AuthException] with a message to show.
+  Future<SignUpOutcome> signUpWithEmail(String email, String password) async {
+    final res = await supabase.auth.signUp(email: email, password: password);
+    // with "Confirm email" on (the Supabase default) there's no session until
+    // they tap the link in their inbox
+    if (res.session == null) return SignUpOutcome.confirmEmail;
+    await _loadAccount();
+    notifyListeners();
+    return SignUpOutcome.signedIn;
+  }
+
+  Future<void> _loadAccount() async {
+    await loadProfile();
+    await loadMeals();
+  }
+
+  Future<void> loadProfile() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
+    final row = await supabase
+        .from('profiles')
+        .select()
+        .eq('id', user.id)
+        .maybeSingle();
+    _profile = row == null ? null : _profileFromRow(row);
+  }
+
+  Future<void> saveProfile(Profile profile) async {
+    if (backendEnabled) {
+      final user = supabase.auth.currentUser;
+      if (user == null) throw StateError('Not signed in');
+      final i = profile.input;
+      final now = DateTime.now().toUtc().toIso8601String();
+      final saved = await supabase
+          .from('profiles')
+          .update({
+            'timezone': profile.timezone,
+            'gender': i.gender,
+            'date_of_birth': i.dateOfBirth,
+            'height_cm': i.heightCm,
+            'weight_kg': i.weightKg,
+            'goal': i.goal,
+            'target_weight_kg': i.targetWeightKg,
+            'activity_level': i.activityLevel,
+            'pace_kg_per_week': i.paceKgPerWeek,
+            'diet_preference': i.dietPreference,
+            'daily_calories': profile.plan.calories,
+            'protein_g': profile.plan.protein,
+            'carbs_g': profile.plan.carbs,
+            'fat_g': profile.plan.fat,
+            'plan_rationale': profile.plan.rationale,
+            'plan_source': 'formula', // 'ai' once generate-plan runs on Gemini
+            'plan_generated_at': now,
+            'onboarding_completed_at': now,
+          })
+          .eq('id', user.id)
+          .select('id');
+      // an account made before the schema existed has no profile row to update
+      if (saved.isEmpty) throw StateError('No profile row for ${user.id}');
+    }
+    _profile = profile;
+    notifyListeners();
+  }
+
+  Future<void> signOut() async {
+    if (backendEnabled) {
+      await supabase.auth.signOut();
+      // so the next Google sign-in offers the account picker again
+      if (_googleReady) await GoogleSignIn.instance.signOut();
+    }
+    _demoSignedIn = false;
+    _profile = null;
+    _meals.clear();
+    notifyListeners();
+  }
+
+  /// The last five weeks — everything the date strip can reach, with room.
+  Future<void> loadMeals() async {
+    final since = DateTime.now().subtract(const Duration(days: 35)).toUtc();
+    final rows = await supabase
+        .from('meals')
+        .select(
+          'id, image_path, status, name, calories, protein_g, carbs_g, fat_g, logged_at',
+        )
+        .eq('status', 'completed')
+        .gte('logged_at', since.toIso8601String())
+        .order('logged_at', ascending: false)
+        .limit(500);
+
+    // private bucket: thumbnails load through short-lived signed URLs
+    final paths = [for (final r in rows) r['image_path'] as String];
+    final urls = <String, String>{};
+    if (paths.isNotEmpty) {
+      final signed = await supabase.storage
+          .from('meal-photos')
+          .createSignedUrlsResult(paths, 60 * 60 * 6);
+      for (final u in signed) {
+        // a photo that's gone just leaves the thumbnail blank
+        if (u case SignedUrlSuccess(:final path, :final signedUrl)) {
+          urls[path] = signedUrl;
+        }
+      }
+    }
+
+    _meals
+      ..clear()
+      ..addAll([
+        for (final r in rows) _mealFromRow(r, urls[r['image_path']] ?? ''),
+      ]);
+    notifyListeners();
+  }
+
+  /// Photo → meal. It shows on Home straight away as analyzing, then becomes the
+  /// real row — or disappears if it wasn't a meal after all.
+  Future<ScanResult> scanMeal(String photo) async {
+    final pendingId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
+    addMeal(
+      Meal(
+        id: pendingId,
+        image: photo,
+        status: MealStatus.analyzing,
+        loggedAt: DateTime.now(),
+      ),
+    );
+
+    ScanResult result;
+    try {
+      result = backendEnabled
+          ? await _scanOnServer(photo)
+          : await _scanDemo(photo);
+    } catch (e) {
+      debugPrint('Scan failed: $e');
+      result = const ScanFailed();
+    }
+
+    _meals.removeWhere((m) => m.id == pendingId);
+    if (result case ScanSuccess(:final meal)) _meals.add(meal);
+    notifyListeners();
+    return result;
+  }
+
+  Future<ScanResult> _scanDemo(String photo) async {
+    await Future<void>.delayed(const Duration(milliseconds: 2200));
+    return ScanSuccess(
+      Meal(
+        id: 'demo-${DateTime.now().microsecondsSinceEpoch}',
+        image: photo,
+        status: MealStatus.completed,
+        loggedAt: DateTime.now(),
+        name: _demoResult.name,
+        calories: _demoResult.calories,
+        protein: _demoResult.protein,
+        carbs: _demoResult.carbs,
+        fat: _demoResult.fat,
+      ),
+    );
+  }
+
+  Future<ScanResult> _scanOnServer(String photo) async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return const ScanFailed();
+
+    final bytes = await _downsize(photo);
+    final path = '${user.id}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    await supabase.storage
+        .from('meal-photos')
+        .uploadBinary(
+          path,
+          bytes,
+          fileOptions: const FileOptions(contentType: 'image/jpeg'),
+        );
+
+    try {
+      final res = await supabase.functions.invoke(
+        'analyze-meal',
+        body: {
+          'image_path': path,
+          'utc_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
+        },
+      );
+      final row = ((res.data as Map)['meal'] as Map).cast<String, dynamic>();
+      // the local file is already on screen; no need to fetch it back
+      return ScanSuccess(_mealFromRow(row, photo));
+    } on FunctionException catch (e) {
+      final details = e.details is Map ? e.details as Map : const {};
+      return switch (e.status) {
+        429 => ScanQuotaReached((details['limit'] as num?)?.toInt() ?? 2),
+        422 => const ScanNotFood(),
+        _ => const ScanFailed(),
+      };
+    }
+  }
+
+  /// A phone photo is 3–5 MB; the bucket takes 1 MB and the model needs far less.
+  Future<Uint8List> _downsize(String photo) async {
+    try {
+      final out = await FlutterImageCompress.compressWithFile(
+        photo,
+        minWidth: _uploadEdge,
+        minHeight: _uploadEdge,
+        quality: 70,
+      );
+      if (out != null) return out;
+    } catch (e) {
+      debugPrint('Compression unavailable: $e');
+    }
+    // no compressor: send the original if the bucket will take it
+    final raw = await File(photo).readAsBytes();
+    if (raw.length > 1024 * 1024) throw StateError('Photo too large to upload');
+    return raw;
+  }
+
+  /// A local day's meals, newest first.
+  List<Meal> mealsOn(DateTime day) =>
+      _meals.where((m) => _day(m.loggedAt) == _day(day)).toList()
+        ..sort((a, b) => b.loggedAt.compareTo(a.loggedAt));
+
+  void addMeal(Meal meal) {
+    _meals.add(meal);
+    notifyListeners();
+  }
+
+  Meal? mealById(String id) {
+    for (final m in _meals) {
+      if (m.id == id) return m;
+    }
+    return null;
+  }
+
+  Future<void> deleteMeal(String id) async {
+    final meal = mealById(id);
+    _meals.removeWhere((m) => m.id == id);
+    notifyListeners();
+
+    if (!backendEnabled || meal == null) return;
+    try {
+      await supabase.from('meals').delete().eq('id', id);
+      if (meal.imagePath != null) {
+        await supabase.storage.from('meal-photos').remove([meal.imagePath!]);
+      }
+    } catch (e) {
+      debugPrint('Delete failed, restoring: $e');
+      _meals.add(meal);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Consecutive days with at least one meal, ending today — or yesterday, so the
+  /// streak doesn't read 0 before you've eaten today.
+  int get streak {
+    final days = _meals.map((m) => _day(m.loggedAt)).toSet();
+    var day = _day(DateTime.now());
+    if (!days.contains(day)) day = day.subtract(const Duration(days: 1));
+
+    var count = 0;
+    while (days.contains(day)) {
+      count++;
+      day = DateTime(day.year, day.month, day.day - 1);
+    }
+    return count;
+  }
+}
+
+Meal _mealFromRow(Map<String, dynamic> r, String image) => Meal(
+  id: r['id'] as String,
+  image: image,
+  imagePath: r['image_path'] as String?,
+  status: r['status'] == 'completed'
+      ? MealStatus.completed
+      : MealStatus.analyzing,
+  loggedAt: DateTime.parse(r['logged_at'] as String).toLocal(),
+  name: (r['name'] as String?) ?? '',
+  calories: (r['calories'] as int?) ?? 0,
+  protein: (r['protein_g'] as int?) ?? 0,
+  carbs: (r['carbs_g'] as int?) ?? 0,
+  fat: (r['fat_g'] as int?) ?? 0,
+);
+
+/// A `profiles` row → [Profile], or null if they never finished onboarding.
+Profile? _profileFromRow(Map<String, dynamic> r) {
+  if (r['onboarding_completed_at'] == null) return null;
+  double n(String k) => (r[k] as num).toDouble();
+  return Profile(
+    input: PlanInput(
+      gender: r['gender'] as String,
+      dateOfBirth: r['date_of_birth'] as String,
+      heightCm: n('height_cm'),
+      weightKg: n('weight_kg'),
+      goal: r['goal'] as String,
+      targetWeightKg: n('target_weight_kg'),
+      activityLevel: r['activity_level'] as String,
+      paceKgPerWeek: n('pace_kg_per_week'),
+      dietPreference: r['diet_preference'] as String,
+    ),
+    plan: Plan(
+      calories: r['daily_calories'] as int,
+      protein: r['protein_g'] as int,
+      carbs: r['carbs_g'] as int,
+      fat: r['fat_g'] as int,
+      rationale: (r['plan_rationale'] as String?) ?? '',
+    ),
+    timezone: (r['timezone'] as String?) ?? 'UTC',
+    memberSince: DateTime.parse(r['created_at'] as String).toLocal(),
+  );
+}
+
+final session = Session();

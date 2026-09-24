@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "NutriStep (Supabase)",
+      "request": "launch",
+      "type": "dart",
+      "args": ["--dart-define-from-file=env.json"]
+    },
+    {
+      "name": "NutriStep (demo, no backend)",
+      "request": "launch",
+      "type": "dart"
+    }
+  ]
+}
