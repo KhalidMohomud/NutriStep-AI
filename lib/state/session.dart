@@ -123,6 +123,10 @@ class Session extends ChangeNotifier {
   bool get isSignedIn =>
       backendEnabled ? supabase.auth.currentSession != null : _demoSignedIn;
   Profile? get profile => _profile;
+
+  /// Today's step count. Health Connect / HealthKit fill this in (PLAN.md
+  /// phase 4); until then it stays 0.
+  int stepsToday = 0;
   String? get email => backendEnabled ? supabase.auth.currentUser?.email : null;
 
   /// Restores a saved session's profile before the first frame, so a returning

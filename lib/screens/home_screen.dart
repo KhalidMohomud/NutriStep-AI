@@ -67,8 +67,7 @@ class _HomeScreenState extends State<HomeScreen> {
         macro: done.fold(0, (t, m) => t + m.grams(macro)),
     };
 
-    // Steps arrive with Health Connect / HealthKit.
-    const steps = 0;
+    final steps = session.stepsToday;
 
     return Scaffold(
       body: SafeArea(
