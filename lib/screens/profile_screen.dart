@@ -3,9 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-import '../state/backend.dart';
-import '../state/reminders.dart';
 import '../state/session.dart';
+import 'settings_screens.dart';
 import '../state/steps.dart';
 import '../theme/app_colors.dart';
 import '../theme/macros.dart';
@@ -32,21 +31,6 @@ const _months = [
   'Dec',
 ];
 
-/// Placeholder rows open this, so a live row and a not-yet-built one look alike
-/// but never pretend to work.
-void _soon(BuildContext context) => showDialog<void>(
-  context: context,
-  builder: (context) => AlertDialog.adaptive(
-    title: const Text('Coming soon'),
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(),
-        child: const Text('OK'),
-      ),
-    ],
-  ),
-);
-
 String _capitalize(String s) =>
     s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 
@@ -66,12 +50,33 @@ class ProfileScreen extends StatelessWidget {
           child: const Text('Cancel'),
         ),
         TextButton(
-          onPressed: () {
+          onPressed: () async {
             Navigator.of(dialog).pop();
-            // Supabase: the delete-account Edge Function goes here, then sign out
-            session.signOut().then((_) {
-              if (context.mounted) context.go('/');
-            });
+            final messenger = ScaffoldMessenger.of(context);
+            final router = GoRouter.of(context);
+            messenger.showSnackBar(
+              const SnackBar(
+                content: Text('Deleting your account…'),
+                duration: Duration(seconds: 30),
+              ),
+            );
+            try {
+              // photos, then the account; meals, steps and the rest cascade
+              await session.deleteAccount();
+              messenger.hideCurrentSnackBar();
+              router.go('/');
+            } catch (e) {
+              debugPrint('Delete account failed: $e');
+              messenger
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      "Couldn't delete your account. Check your connection and try again.",
+                    ),
+                  ),
+                );
+            }
           },
           child: const Text('Delete', style: TextStyle(color: _destructive)),
         ),
@@ -116,7 +121,7 @@ class ProfileScreen extends StatelessWidget {
             const SizedBox(height: 18),
             _UserCard(onTap: () => _editName(context)),
             const SizedBox(height: 12),
-            _UpgradeCard(onTap: () => _soon(context)),
+            _UpgradeCard(onTap: () => showProSheet(context)),
 
             const _SectionTitle('Goals & Tracking'),
             _Card(
@@ -156,7 +161,7 @@ class ProfileScreen extends StatelessWidget {
                   icon: Icons.notifications_none_rounded,
                   label: 'Step reminders',
                   value: session.remindersOn
-                      ? '${StepReminders.summaryHour - 12} PM daily'
+                      ? '${hourLabel(session.reminderHour)} daily'
                       : 'Off',
                   onTap: () => session.setReminders(!session.remindersOn),
                 ),
@@ -181,13 +186,13 @@ class ProfileScreen extends StatelessWidget {
                 _Row(
                   icon: Icons.tune,
                   label: 'Preferences',
-                  onTap: () => _soon(context),
+                  onTap: () => context.push('/profile/preferences'),
                 ),
                 _Row(
                   icon: Icons.translate,
                   label: 'Language',
-                  value: 'English',
-                  onTap: () => _soon(context),
+                  value: languageName(session.language),
+                  onTap: () => showLanguageSheet(context),
                 ),
               ],
             ),
@@ -198,12 +203,12 @@ class ProfileScreen extends StatelessWidget {
                 _Row(
                   icon: Icons.back_hand_outlined,
                   label: 'Privacy Policy',
-                  onTap: () => _soon(context),
+                  onTap: () => context.push('/profile/privacy'),
                 ),
                 _Row(
                   icon: Icons.description_outlined,
                   label: 'Terms of Service',
-                  onTap: () => _soon(context),
+                  onTap: () => context.push('/profile/terms'),
                 ),
               ],
             ),
@@ -214,7 +219,7 @@ class ProfileScreen extends StatelessWidget {
                 _Row(
                   icon: Icons.chat_bubble_outline,
                   label: 'Send feedback',
-                  onTap: () => _soon(context),
+                  onTap: () => showFeedbackSheet(context),
                 ),
               ],
             ),
@@ -239,10 +244,7 @@ class ProfileScreen extends StatelessWidget {
                   icon: Icons.delete_outline,
                   label: 'Delete your account',
                   tint: _destructive,
-                  // real deletion needs the delete-account Edge Function (service role);
-                  // until then, don't pretend
-                  onTap: () =>
-                      backendEnabled ? _soon(context) : _confirmDelete(context),
+                  onTap: () => _confirmDelete(context),
                 ),
               ],
             ),

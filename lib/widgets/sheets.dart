@@ -200,43 +200,313 @@ Future<void> showMealSheet(BuildContext context, Meal meal) {
           ],
         ),
         const SizedBox(height: 22),
-        Pressable(
-          onTap: () {
-            final messenger = ScaffoldMessenger.of(context);
-            Navigator.of(context).pop();
-            session.deleteMeal(meal.id).catchError((Object _) {
-              messenger.showSnackBar(
-                const SnackBar(
-                  content: Text("Couldn't delete that meal. Try again."),
-                ),
-              );
-            });
-          },
-          child: Container(
-            height: 52,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              border: Border.all(color: AppColors.borderStrong),
+        Row(
+          children: [
+            Expanded(
+              child: PrimaryButton(
+                label: 'Edit',
+                height: 52,
+                onPressed: () {
+                  final root = Navigator.of(
+                    context,
+                    rootNavigator: true,
+                  ).context;
+                  Navigator.of(context).pop();
+                  showEditMealSheet(root, meal);
+                },
+              ),
             ),
-            child: const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Pressable(
+                onTap: () {
+                  final messenger = ScaffoldMessenger.of(context);
+                  Navigator.of(context).pop();
+                  session.deleteMeal(meal.id).catchError((Object _) {
+                    messenger.showSnackBar(
+                      const SnackBar(
+                        content: Text("Couldn't delete that meal. Try again."),
+                      ),
+                    );
+                  });
+                },
+                child: Container(
+                  height: 52,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(15),
+                    border: Border.all(color: AppColors.borderStrong),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.delete_outline,
+                        size: 20,
+                        color: AppColors.error,
+                      ),
+                      SizedBox(width: 6),
+                      Text(
+                        'Delete',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    ),
+  );
+}
+
+const _portions = <(String, double)>[
+  ('½', 0.5),
+  ('¾', 0.75),
+  ('1×', 1),
+  ('1½', 1.5),
+  ('2×', 2),
+];
+
+/// The way out when the AI got it wrong: pick how much of it you ate, then
+/// fine-tune any number. Saved as `user_corrected`.
+Future<void> showEditMealSheet(BuildContext context, Meal original) {
+  final name = TextEditingController(text: original.name);
+  var factor = 1.0;
+  var meal = original;
+
+  return _sheet(
+    context,
+    (sheet) => StatefulBuilder(
+      builder: (sheet, set) {
+        Widget stepper(
+          String label,
+          int value,
+          String unit,
+          int step,
+          Color color,
+          void Function(int) onChange,
+        ) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppColors.border),
+            ),
+            child: Row(
               children: [
-                Icon(Icons.delete_outline, size: 20, color: AppColors.error),
-                SizedBox(width: 8),
-                Text(
-                  'Delete meal',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.error,
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: value - step < 0
+                      ? null
+                      : () => onChange(value - step),
+                  icon: const Icon(
+                    Icons.remove_circle_outline,
+                    color: AppColors.textFaint,
+                  ),
+                ),
+                SizedBox(
+                  width: 74,
+                  child: Text(
+                    '$value $unit',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => onChange(value + step),
+                  icon: const Icon(
+                    Icons.add_circle_outline,
+                    color: AppColors.brandGreen,
                   ),
                 ),
               ],
             ),
+          );
+        }
+
+        // scrolls, and lifts above the keyboard, while the name is being edited
+        return Flexible(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(sheet).bottom,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 18),
+                const Text(
+                  'Edit meal',
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.ink,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: name,
+                  textCapitalization: TextCapitalization.sentences,
+                  cursorColor: AppColors.brandGreen,
+                  style: const TextStyle(fontSize: 17, color: AppColors.ink),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: AppColors.card,
+                    prefixIcon: const Icon(
+                      Icons.restaurant,
+                      color: AppColors.textFaint,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(
+                        color: AppColors.borderStrong,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: const BorderSide(
+                        color: AppColors.brandGreen,
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text(
+                  'How much did you eat?',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.ink,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    for (final (label, f) in _portions) ...[
+                      if (f != _portions.first.$2) const SizedBox(width: 8),
+                      Expanded(
+                        child: Pressable(
+                          onTap: () => set(() {
+                            factor = f;
+                            meal = original.scaled(f);
+                          }),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            height: 42,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: factor == f
+                                  ? AppColors.brandGreenTint
+                                  : AppColors.card,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: factor == f
+                                    ? AppColors.brandGreen
+                                    : AppColors.border,
+                                width: factor == f ? 2 : 1,
+                              ),
+                            ),
+                            child: Text(
+                              label,
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                color: factor == f
+                                    ? AppColors.brandGreenDark
+                                    : AppColors.ink,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 16),
+                stepper(
+                  'Calories',
+                  meal.calories,
+                  'kcal',
+                  10,
+                  AppColors.brandGreen,
+                  (v) => set(() => meal = meal.copyWith(calories: v)),
+                ),
+                const SizedBox(height: 8),
+                for (final macro in Macro.values) ...[
+                  stepper(
+                    macro.label,
+                    meal.grams(macro),
+                    'g',
+                    1,
+                    macro.color,
+                    (v) => set(() {
+                      meal = switch (macro) {
+                        Macro.protein => meal.copyWith(protein: v),
+                        Macro.carbs => meal.copyWith(carbs: v),
+                        Macro.fat => meal.copyWith(fat: v),
+                      };
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+                const SizedBox(height: 10),
+                PrimaryButton(
+                  label: 'Save',
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final edited = meal.copyWith(
+                      name: name.text.trim().isEmpty
+                          ? original.name
+                          : name.text.trim(),
+                    );
+                    Navigator.of(sheet).pop();
+                    try {
+                      await session.updateMeal(edited);
+                    } catch (_) {
+                      messenger.showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            "Couldn't save your changes. Try again.",
+                          ),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+        );
+      },
     ),
   );
 }

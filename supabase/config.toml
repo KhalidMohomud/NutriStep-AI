@@ -411,3 +411,9 @@ s3_secret_key = "env(S3_SECRET_KEY)"
 # legacy and new asymmetric JWT signing keys.
 [functions.analyze-meal]
 verify_jwt = false
+
+[functions.ai-coach]
+verify_jwt = false
+
+[functions.delete-account]
+verify_jwt = false

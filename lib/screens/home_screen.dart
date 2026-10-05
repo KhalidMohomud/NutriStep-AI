@@ -17,7 +17,6 @@ import '../widgets/sheets.dart';
 import 'plan_reveal_screen.dart';
 
 const _weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const _stepGoal = Session.stepGoal;
 
 DateTime _midnight(DateTime d) => DateTime(d.year, d.month, d.day);
 
@@ -233,6 +232,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
             // steps are a today thing; past days show meals only
             if (isToday) _StepsCard(steps: steps, status: session.stepsStatus),
+            const _CoachCard(),
             Padding(
               padding: const EdgeInsets.fromLTRB(22, 28, 22, 0),
               child: Text(
@@ -332,7 +332,7 @@ class _StepsCard extends StatelessWidget {
           Ring(
             size: 58,
             stroke: 7,
-            progress: connected ? steps / _stepGoal : 0,
+            progress: connected ? steps / session.stepGoal : 0,
             color: AppColors.brandBlue,
             child: const Icon(
               Icons.directions_walk,
@@ -351,7 +351,7 @@ class _StepsCard extends StatelessWidget {
                       text: formatThousands(steps),
                       children: [
                         TextSpan(
-                          text: ' / ${formatThousands(_stepGoal)}',
+                          text: ' / ${formatThousands(session.stepGoal)}',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w500,
@@ -409,6 +409,70 @@ class _StepsCard extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The way into the AI coach — a question to tap, not just a button.
+class _CoachCard extends StatelessWidget {
+  const _CoachCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Pressable(
+      onTap: () => context.push('/coach'),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(22, 12, 22, 0),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [AppColors.brandGreenTint, Color(0xFFE6F2FD)],
+          ),
+          border: Border.all(color: const Color(0xFFD6EBD8)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 46,
+              height: 46,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: AppColors.brandGradient,
+              ),
+              child: const Icon(
+                Icons.auto_awesome,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Ask your AI coach',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  SizedBox(height: 2),
+                  Text(
+                    '"What should I eat for dinner?"',
+                    style: TextStyle(fontSize: 14, color: AppColors.textMuted),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.textFaint),
+          ],
+        ),
       ),
     );
   }

@@ -9,6 +9,7 @@ import 'theme/app_colors.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initBackend();
+  await session.loadPreferences(); // the profile row, loaded next, wins
   await session.restore();
   await session.reminders.init();
   runApp(const NutriStepApp());

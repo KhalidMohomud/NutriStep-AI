@@ -10,14 +10,13 @@ String _thousands(int n) =>
 
 /// Step notifications, made on the phone — no server, no push service.
 ///
-/// - Every evening at [summaryHour]: "You've walked 6,842 steps so far today".
+/// - Every evening at the user's reminder hour: "You've walked 6,842 steps today".
 ///   The number is the last one the app saw, so the notification is
 ///   rescheduled each time the count changes.
 /// - On days the app isn't opened, a plain nudge fires at that time instead
 ///   (the app can't read the count without running).
 /// - Once a day, when the goal is reached: "10,000 steps!".
 class StepReminders {
-  static const summaryHour = 20;
   static const _enabledKey = 'reminders.steps';
   static const _goalShownKey = 'reminders.goalShownOn';
 
@@ -91,7 +90,7 @@ class StepReminders {
   }
 
   /// Called whenever today's count changes.
-  Future<void> update(int steps, int goal) async {
+  Future<void> update(int steps, int goal, int hour) async {
     if (!_ready || !enabled) return;
     try {
       final now = tz.TZDateTime.now(tz.local);
@@ -100,7 +99,7 @@ class StepReminders {
         now.year,
         now.month,
         now.day,
-        summaryHour,
+        hour,
       );
 
       // tonight's summary, with the latest count

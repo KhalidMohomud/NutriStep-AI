@@ -4,17 +4,20 @@ import 'package:go_router/go_router.dart';
 import 'onboarding/steps.dart';
 import 'screens/app_shell.dart';
 import 'screens/building_screen.dart';
+import 'screens/coach_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_step_screen.dart';
 import 'screens/plan_includes_screen.dart';
 import 'screens/plan_reveal_screen.dart';
 import 'screens/profile_screen.dart';
 import 'screens/scan_screen.dart';
+import 'screens/settings_screens.dart';
 import 'screens/sign_in_screen.dart';
 import 'screens/welcome_screen.dart';
 import 'state/session.dart';
 
-const _tabs = ['/home', '/scan', '/profile'];
+// everything that needs an account and a plan
+const _tabs = ['/home', '/scan', '/profile', '/coach'];
 
 final router = GoRouter(
   initialLocation: '/',
@@ -36,6 +39,8 @@ final router = GoRouter(
   },
   routes: [
     GoRoute(path: '/', builder: (_, _) => const WelcomeScreen()),
+    // full screen, over the tabs: a chat needs the keyboard and the whole height
+    GoRoute(path: '/coach', builder: (_, _) => const CoachScreen()),
     GoRoute(
       path: '/sign-in',
       builder: (_, _) => const SignInScreen(),
@@ -87,6 +92,18 @@ final router = GoRouter(
                 GoRoute(
                   path: 'details',
                   builder: (_, _) => const PersonalDetailsScreen(),
+                ),
+                GoRoute(
+                  path: 'preferences',
+                  builder: (_, _) => const PreferencesScreen(),
+                ),
+                GoRoute(
+                  path: 'privacy',
+                  builder: (_, _) => const LegalScreen.privacy(),
+                ),
+                GoRoute(
+                  path: 'terms',
+                  builder: (_, _) => const LegalScreen.terms(),
                 ),
               ],
             ),

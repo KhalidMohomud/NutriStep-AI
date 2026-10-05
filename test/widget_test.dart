@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:nutristep_ai/main.dart';
 import 'package:nutristep_ai/plan/plan.dart';
 import 'package:nutristep_ai/state/session.dart';
+import 'package:nutristep_ai/screens/settings_screens.dart';
 import 'package:nutristep_ai/widgets/onboarding.dart';
 
 void main() {
@@ -106,5 +107,45 @@ void main() {
     expect(nameFromEmail('khalid.mohamud@gmail.com'), 'Khalid Mohamud');
     expect(nameFromEmail('ali_99@yahoo.com'), 'Ali');
     expect(nameFromEmail('12345@test.com'), isNull);
+  });
+
+  test('a portion scales every number together', () {
+    final m = Meal(
+      id: 'm',
+      image: '',
+      status: MealStatus.completed,
+      loggedAt: DateTime(2026),
+      name: 'Rice bowl',
+      calories: 540,
+      protein: 42,
+      carbs: 55,
+      fat: 13,
+    );
+    final half = m.scaled(0.5);
+    expect(
+      [half.calories, half.protein, half.carbs, half.fat],
+      [270, 21, 28, 7],
+    );
+    expect(half.name, 'Rice bowl');
+    expect(m.scaled(2).calories, 1080);
+  });
+
+  test('reminder hours read like a clock', () {
+    expect(hourLabel(20), '8 PM');
+    expect(hourLabel(12), '12 PM');
+    expect(hourLabel(0), '12 AM');
+    expect(hourLabel(9), '9 AM');
+  });
+
+  test('the coach answers in demo mode and keeps the conversation', () async {
+    final s = Session();
+    final reply = await s.askCoach('What should I eat?');
+    expect(reply, isA<CoachAnswer>());
+    expect(s.coachTurns.map((t) => t.fromUser), [true, false]);
+    expect(
+      await s.askCoach('   '),
+      isA<CoachFailed>(),
+      reason: 'blank questions are not sent',
+    );
   });
 }

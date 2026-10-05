@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show
         AuthException,
@@ -68,6 +69,33 @@ class Meal {
     Macro.carbs => carbs,
     Macro.fat => fat,
   };
+
+  Meal copyWith({
+    String? name,
+    int? calories,
+    int? protein,
+    int? carbs,
+    int? fat,
+  }) => Meal(
+    id: id,
+    image: image,
+    imagePath: imagePath,
+    status: status,
+    loggedAt: loggedAt,
+    name: name ?? this.name,
+    calories: calories ?? this.calories,
+    protein: protein ?? this.protein,
+    carbs: carbs ?? this.carbs,
+    fat: fat ?? this.fat,
+  );
+
+  /// "I ate half of it": every number scaled together, rounded.
+  Meal scaled(double factor) => copyWith(
+    calories: (calories * factor).round(),
+    protein: (protein * factor).round(),
+    carbs: (carbs * factor).round(),
+    fat: (fat * factor).round(),
+  );
 }
 
 DateTime _day(DateTime d) => DateTime(d.year, d.month, d.day);
@@ -121,6 +149,33 @@ const _demoResult = (
 /// uploads ~100 KB and Gemini's image tokens low.
 const _uploadEdge = 1024;
 
+class CoachTurn {
+  const CoachTurn({required this.fromUser, required this.text});
+  final bool fromUser;
+  final String text;
+}
+
+/// How a coach question ended.
+sealed class CoachReply {
+  const CoachReply();
+}
+
+class CoachAnswer extends CoachReply {
+  const CoachAnswer(this.text, {this.used, this.limit});
+  final String text;
+  final int? used;
+  final int? limit;
+}
+
+class CoachQuotaReached extends CoachReply {
+  const CoachQuotaReached(this.limit);
+  final int limit;
+}
+
+class CoachFailed extends CoachReply {
+  const CoachFailed();
+}
+
 /// What an email sign-up ended in.
 enum SignUpOutcome { signedIn, confirmEmail }
 
@@ -143,7 +198,64 @@ class Session extends ChangeNotifier {
 
   final _steps = StepCounter();
   StepsStatus stepsStatus = StepsStatus.notConnected;
-  static const stepGoal = 10000;
+
+  // ── preferences ────────────────────────────────────────────────────────────
+  // Kept on the device and, when signed in, on the profile row, so they follow
+  // the account to a new phone.
+
+  int stepGoal = 10000;
+  int reminderHour = 20;
+
+  /// en | so | ar — the language the AI answers in (meal names, the coach).
+  String language = 'en';
+
+  Future<void> loadPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      stepGoal = prefs.getInt('pref.stepGoal') ?? stepGoal;
+      reminderHour = prefs.getInt('pref.reminderHour') ?? reminderHour;
+      language = prefs.getString('pref.language') ?? language;
+    } catch (e) {
+      debugPrint('Could not read preferences: $e');
+    }
+  }
+
+  Future<void> updatePreferences({
+    int? stepGoal,
+    int? reminderHour,
+    String? language,
+  }) async {
+    this.stepGoal = stepGoal ?? this.stepGoal;
+    this.reminderHour = reminderHour ?? this.reminderHour;
+    this.language = language ?? this.language;
+    notifyListeners();
+    reminders.update(stepsToday, this.stepGoal, this.reminderHour);
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('pref.stepGoal', this.stepGoal);
+      await prefs.setInt('pref.reminderHour', this.reminderHour);
+      await prefs.setString('pref.language', this.language);
+    } catch (e) {
+      debugPrint('Could not save preferences: $e');
+    }
+
+    final user = backendEnabled ? supabase.auth.currentUser : null;
+    if (user == null) return;
+    try {
+      await supabase
+          .from('profiles')
+          .update({
+            'step_goal': this.stepGoal,
+            'reminder_hour': this.reminderHour,
+            'language': this.language,
+          })
+          .eq('id', user.id);
+    } catch (e) {
+      // e.g. the preferences migration isn't pushed yet — the device copy still holds
+      debugPrint('Could not sync preferences: $e');
+    }
+  }
 
   final reminders = StepReminders();
   bool get remindersOn => reminders.enabled;
@@ -151,7 +263,7 @@ class Session extends ChangeNotifier {
   Future<void> setReminders(bool on) async {
     if (on) {
       await reminders.enable();
-      await reminders.update(stepsToday, stepGoal);
+      await reminders.update(stepsToday, stepGoal, reminderHour);
     } else {
       await reminders.disable();
     }
@@ -194,7 +306,7 @@ class Session extends ChangeNotifier {
     stepsToday = steps;
     notifyListeners();
     _syncSteps();
-    reminders.update(steps, stepGoal);
+    reminders.update(steps, stepGoal, reminderHour);
   }
 
   /// Today's total into activity_logs — at most every few minutes, not every step.
@@ -359,6 +471,11 @@ class Session extends ChangeNotifier {
         .maybeSingle();
     _profile = row == null ? null : _profileFromRow(row);
     _displayName = row?['display_name'] as String?;
+    if (row != null) {
+      stepGoal = (row['step_goal'] as int?) ?? stepGoal;
+      reminderHour = (row['reminder_hour'] as int?) ?? reminderHour;
+      language = (row['language'] as String?) ?? language;
+    }
 
     // given at sign-up but not saved yet (the row is made by a trigger)
     final pending = user.userMetadata?['display_name'] as String?;
@@ -418,7 +535,94 @@ class Session extends ChangeNotifier {
     _profile = null;
     _displayName = null;
     _meals.clear();
+    coachTurns.clear();
     notifyListeners();
+  }
+
+  /// Erases the account everywhere (photos, rows, login), then signs out.
+  /// Throws if the server couldn't finish — the account still works then.
+  Future<void> deleteAccount() async {
+    if (backendEnabled) await supabase.functions.invoke('delete-account');
+    await signOut();
+  }
+
+  /// "Send feedback" — straight into the feedback table.
+  Future<void> sendFeedback(String message) async {
+    final text = message.trim();
+    if (text.isEmpty) return;
+    if (!backendEnabled) return;
+    await supabase.from('feedback').insert({
+      'user_id': supabase.auth.currentUser?.id,
+      'message': text,
+      'app_info': '${defaultTargetPlatform.name} · NutriStep AI',
+    });
+  }
+
+  // ── AI coach ───────────────────────────────────────────────────────────────
+
+  /// This session's conversation — not stored; it starts fresh on next launch.
+  final List<CoachTurn> coachTurns = [];
+  bool coachThinking = false;
+
+  Future<CoachReply> askCoach(String question) async {
+    final text = question.trim();
+    if (text.isEmpty || coachThinking) return const CoachFailed();
+    coachTurns.add(CoachTurn(fromUser: true, text: text));
+    coachThinking = true;
+    notifyListeners();
+
+    CoachReply reply;
+    try {
+      reply = backendEnabled ? await _askServer() : await _askDemo(text);
+    } catch (e) {
+      debugPrint('Coach failed: $e');
+      reply = const CoachFailed();
+    }
+    if (reply case CoachAnswer(:final text)) {
+      coachTurns.add(CoachTurn(fromUser: false, text: text));
+    } else {
+      coachTurns.removeLast(); // so "try again" resends it
+    }
+    coachThinking = false;
+    notifyListeners();
+    return reply;
+  }
+
+  Future<CoachReply> _askServer() async {
+    try {
+      final res = await supabase.functions.invoke(
+        'ai-coach',
+        body: {
+          'messages': [
+            for (final t in coachTurns)
+              {'role': t.fromUser ? 'user' : 'model', 'text': t.text},
+          ],
+          'utc_offset_minutes': DateTime.now().timeZoneOffset.inMinutes,
+        },
+      );
+      final data = res.data as Map;
+      return CoachAnswer(
+        data['reply'] as String,
+        used: (data['used'] as num?)?.toInt(),
+        limit: (data['limit'] as num?)?.toInt(),
+      );
+    } on FunctionException catch (e) {
+      final details = e.details is Map ? e.details as Map : const {};
+      return e.status == 429
+          ? CoachQuotaReached((details['limit'] as num?)?.toInt() ?? 3)
+          : const CoachFailed();
+    }
+  }
+
+  Future<CoachReply> _askDemo(String question) async {
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    final left =
+        (profile?.plan.calories ?? 2000) -
+        mealsOn(DateTime.now()).fold(0, (t, m) => t + m.calories);
+    return CoachAnswer(
+      'You have about $left kcal left today. A plate of grilled chicken, rice and '
+      'vegetables would fit well and keep your protein up.',
+    );
   }
 
   /// The last five weeks — everything the date strip can reach, with room.
@@ -572,6 +776,36 @@ class Session extends ChangeNotifier {
       if (m.id == id) return m;
     }
     return null;
+  }
+
+  /// Saves a corrected meal (portion or numbers). Shows at once; rolls back
+  /// and rethrows if the server says no.
+  Future<void> updateMeal(Meal meal) async {
+    final i = _meals.indexWhere((m) => m.id == meal.id);
+    if (i < 0) return;
+    final before = _meals[i];
+    _meals[i] = meal;
+    notifyListeners();
+
+    if (!backendEnabled) return;
+    try {
+      await supabase
+          .from('meals')
+          .update({
+            'name': meal.name,
+            'calories': meal.calories,
+            'protein_g': meal.protein,
+            'carbs_g': meal.carbs,
+            'fat_g': meal.fat,
+            'source': 'user_corrected',
+          })
+          .eq('id', meal.id);
+    } catch (e) {
+      debugPrint('Meal update failed, restoring: $e');
+      _meals[i] = before;
+      notifyListeners();
+      rethrow;
+    }
   }
 
   Future<void> deleteMeal(String id) async {
