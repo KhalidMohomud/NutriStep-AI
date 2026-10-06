@@ -142,6 +142,39 @@ class StepCounter {
     return _total;
   }
 
+  /// One reading, for the background task: no permission prompts, no stream
+  /// left running. Returns the best count it can get, or null if none.
+  Future<int?> readOnce() async {
+    int? best;
+    try {
+      await _configure();
+      final now = DateTime.now();
+      final midnight = DateTime(now.year, now.month, now.day);
+      if (_isIOS ||
+          (await _health.hasPermissions([HealthDataType.STEPS]) ?? false)) {
+        best = await _health.getTotalStepsInInterval(midnight, now);
+      }
+    } catch (e) {
+      // Health Connect may refuse background reads; the sensor still works
+      debugPrint('Background health read failed: $e');
+    }
+    if (!_isIOS) {
+      try {
+        if (await Permission.activityRecognition.isGranted) {
+          // the step counter reports its current value as soon as it's listened to
+          final event = await Pedometer.stepCountStream.first.timeout(
+            const Duration(seconds: 10),
+          );
+          final sensor = await _sensorStepsToday(event.steps);
+          if (best == null || sensor > best) best = sensor;
+        }
+      } catch (e) {
+        debugPrint('Background sensor read failed: $e');
+      }
+    }
+    return best;
+  }
+
   int get _total => _sensorToday > _healthToday ? _sensorToday : _healthToday;
 
   void _listenToSensor() {
@@ -153,6 +186,8 @@ class StepCounter {
 
   Future<int> _sensorStepsToday(int sinceBoot) async {
     final prefs = await SharedPreferences.getInstance();
+    // the background task writes these too, from another isolate
+    await prefs.reload();
     final today = _day(DateTime.now());
     var base = prefs.getInt(_baseKey) ?? sinceBoot;
     final last = prefs.getInt(_lastKey);

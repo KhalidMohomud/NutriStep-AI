@@ -45,7 +45,16 @@
 		<true/>
 		<key>UIApplicationSupportsIndirectInputEvents</key>
 		<true/>
-		<key>NSHealthShareUsageDescription</key>
+		<!-- the hourly step refresh behind the evening notification -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.ditalsolutions.nutristep.steps</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
+	<key>NSHealthShareUsageDescription</key>
 	<string>NutriStep AI reads your step count from Apple Health to show it next to your meals.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>NutriStep AI does not write to Apple Health; iOS requires this text to read steps.</string>

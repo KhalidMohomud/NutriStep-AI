@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -34,6 +35,8 @@ class StepReminders {
       'steps',
       'Step summary',
       channelDescription: 'Your daily steps, every evening',
+      icon: 'ic_stat_notify', // the logo as a white silhouette
+      color: Color(0xFF05A029), // brand green: tints the icon and app name
     ),
     iOS: DarwinNotificationDetails(),
   );
@@ -45,7 +48,7 @@ class StepReminders {
       tz.setLocalLocation(tz.getLocation(zone.identifier));
       await _plugin.initialize(
         settings: const InitializationSettings(
-          android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+          android: AndroidInitializationSettings('ic_stat_notify'),
           // permission is asked when they switch reminders on, not at launch
           iOS: DarwinInitializationSettings(
             requestAlertPermission: false,
@@ -87,6 +90,21 @@ class StepReminders {
     enabled = false;
     await (await SharedPreferences.getInstance()).setBool(_enabledKey, false);
     if (_ready) await _plugin.cancelAll();
+  }
+
+  /// Shows the evening summary right now, so it can be checked without waiting.
+  Future<bool> showTest(int steps, int goal) async {
+    if (!_ready) return false;
+    final left = goal - steps;
+    await _plugin.show(
+      id: _todayId,
+      title: "You've walked ${_thousands(steps)} steps today 👟",
+      body: left > 0
+          ? '${_thousands(left)} more to reach ${_thousands(goal)}. A short evening walk gets you there.'
+          : 'Goal reached — great work today! 🎉',
+      notificationDetails: _details,
+    );
+    return true;
   }
 
   /// Called whenever today's count changes.

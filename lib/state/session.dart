@@ -15,6 +15,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'
 import '../plan/plan.dart';
 import '../theme/macros.dart';
 import 'backend.dart';
+import 'background.dart';
 import 'reminders.dart';
 import 'steps.dart';
 
@@ -263,11 +264,25 @@ class Session extends ChangeNotifier {
   Future<void> setReminders(bool on) async {
     if (on) {
       await reminders.enable();
-      await reminders.update(stepsToday, stepGoal, reminderHour);
+      if (reminders.enabled) {
+        await reminders.update(stepsToday, stepGoal, reminderHour);
+        // hourly, even with the app closed, so 8 PM shows the real count
+        await startBackgroundSteps();
+      }
     } else {
       await reminders.disable();
+      await stopBackgroundSteps();
     }
     notifyListeners();
+  }
+
+  /// The evening summary, right now — so it can be checked without waiting.
+  /// Asks for permission first if reminders were never switched on.
+  Future<bool> sendTestReminder() async {
+    if (!reminders.enabled) await setReminders(true);
+    if (!reminders.enabled) return false;
+    await refreshSteps();
+    return reminders.showTest(stepsToday, stepGoal);
   }
 
   /// Today's step count, kept live while the app is open.
@@ -299,6 +314,8 @@ class Session extends ChangeNotifier {
   Future<void> refreshSteps() async {
     if (stepsStatus != StepsStatus.connected) return;
     _setSteps(await _steps.refresh());
+    // on every open/resume, even when the count hasn't moved since last time
+    await reminders.update(stepsToday, stepGoal, reminderHour);
   }
 
   void _setSteps(int steps) {

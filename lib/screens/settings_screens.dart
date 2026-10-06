@@ -235,6 +235,64 @@ class PreferencesScreen extends StatelessWidget {
               onPick: (h) => session.updatePreferences(reminderHour: h),
             ),
           ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+            child: Pressable(
+              onTap: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final sent = await session.sendTestReminder();
+                messenger.showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      sent
+                          ? 'Sent — check your notifications.'
+                          : 'Notifications are off for NutriStep. Turn them on in your phone Settings.',
+                    ),
+                  ),
+                );
+              },
+              child: Container(
+                height: 48,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.card,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.brandGreen, width: 1.5),
+                ),
+                child: const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.notifications_active_outlined,
+                      size: 20,
+                      color: AppColors.brandGreen,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      'Send a test notification',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.brandGreen,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(22, 10, 22, 0),
+            child: Text(
+              'Your steps are checked about once an hour, even with the app closed, so the evening '
+              'summary shows the real count.',
+              style: TextStyle(
+                fontSize: 13,
+                height: 18 / 13,
+                color: AppColors.textFaint,
+              ),
+            ),
+          ),
           const _Label(
             'Language',
             hint:

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'router.dart';
 import 'state/backend.dart';
+import 'state/background.dart';
 import 'state/session.dart';
 import 'theme/app_colors.dart';
 
@@ -12,6 +15,8 @@ Future<void> main() async {
   await session.loadPreferences(); // the profile row, loaded next, wins
   await session.restore();
   await session.reminders.init();
+  // keeps the hourly refresh registered (a no-op if it already is)
+  if (session.remindersOn) unawaited(startBackgroundSteps());
   runApp(const NutriStepApp());
 }
 
