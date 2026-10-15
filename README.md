@@ -3,7 +3,9 @@
 </p>
 
 <h1 align="center">NutriStep AI</h1>
-[![Architecture diagram of khalidmohomud/nutristep-ai](https://gitdiagram.com/khalidmohomud/nutristep-ai/diagram.png)](https://gitdiagram.com/khalidmohomud/nutristep-ai?utm_source=readme&utm_medium=picture)
+
+
+
 
 <p align="center">
   <b>Scan • Track • Live better</b><br>
